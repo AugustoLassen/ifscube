@@ -13,7 +13,7 @@ from ifscube import elprofile, parser, spectools
 from ifscube import plots as ifs_plots
 from .datacube import Cube
 from .onedspec import Spectrum
-
+from .parallel_utils import parallel_process_cube, get_optimal_workers
 
 class FixedSolution:
     def __init__(self, solution: np.ndarray):
@@ -852,6 +852,112 @@ class LineFit3D(LineFit):
         fit_args = (min_method, minimum_good_fraction, verbose)
         self._select_spaxel(function=super().fit, used_attributes=attributes, modified_attributes=mod_attr,
                             args=fit_args, kwargs=kwargs, description='Fitting spectral features', fitting=True)
+
+    def fit_parallel(self, n_workers=None, chunksize=10):
+        """
+        Fits the spectral features in parallel.
+        
+        Parameters
+        ----------
+        n_workers : int, optional
+            Number of worker processes. Default is 75% of available CPU cores.
+        chunksize : int, optional
+            Size of chunks for parallel processing.
+            
+        Returns
+        -------
+        self : LineFit3D
+            The fitted object.
+        """
+        if self.solution is None:
+            self.solution = np.zeros((len(self.initial_guess),) + self.data.shape[1:])
+        if self.reduced_chi_squared is None:
+            self.reduced_chi_squared = np.zeros(self.data.shape[1:])
+        if self.model_spectrum is None:
+            self.model_spectrum = np.zeros_like(self.data)
+        if self.status is None:
+            self.status = np.ones(self.data.shape[1:])
+        for i in ['solution', 'reduced_chi_squared', 'model_spectrum']:
+            self._mask2d_to_nan(i)
+
+        # Define function to process a single spaxel
+        def process_spaxel_fit(y, x, **kwargs):
+            # Create a copy of the current object state for this spaxel
+            spaxel_data = {}
+            for attr in ['data', 'variance', 'flags', 'mask', 'pseudo_continuum', 'stellar', 'weights']:
+                if attr in self.two_d_attributes:
+                    spaxel_data[attr] = getattr(self, attr)[y, x]
+                else:
+                    spaxel_data[attr] = getattr(self, attr)[:, y, x]
+            
+            # Create a LineFit object for this spaxel
+            spaxel_fit = LineFit(self.input_data, self.function.__name__, self.fitting_window, self.instrument_dispersion)
+            
+            # Copy necessary attributes
+            spaxel_fit.data = spaxel_data['data']
+            spaxel_fit.variance = spaxel_data['variance']
+            spaxel_fit.flags = spaxel_data['flags']
+            spaxel_fit.mask = spaxel_data['mask']
+            spaxel_fit.pseudo_continuum = spaxel_data['pseudo_continuum']
+            spaxel_fit.stellar = spaxel_data['stellar']
+            spaxel_fit.weights = spaxel_data['weights']
+            
+            # Copy feature information
+            spaxel_fit.feature_names = self.feature_names.copy()
+            spaxel_fit.feature_wavelengths = self.feature_wavelengths.copy()
+            spaxel_fit.initial_guess = self.initial_guess.copy()
+            spaxel_fit.parameter_names = self.parameter_names.copy()
+            spaxel_fit.bounds = self.bounds.copy()
+            spaxel_fit.constraints = self.constraints.copy()
+            spaxel_fit.constraint_expressions = self.constraint_expressions.copy()
+            spaxel_fit.kinematic_groups = self.kinematic_groups.copy()
+            spaxel_fit.fixed_features = self.fixed_features.copy()
+            spaxel_fit.fixed_ratios = self.fixed_ratios.copy()
+            spaxel_fit.parameters_per_feature = self.parameters_per_feature
+
+            # Perform the fit
+            try:
+                spaxel_fit.fit(**kwargs)
+                status = 0
+            except Exception as e:
+                print(f"Error fitting spaxel at ({y}, {x}): {str(e)}")
+                status = 1
+            
+            # Return the results
+            return {
+                'solution': spaxel_fit.solution if status == 0 else np.full_like(self.initial_guess, np.nan),
+                'reduced_chi_squared': spaxel_fit.reduced_chi_squared if status == 0 else np.nan,
+                'model_spectrum': spaxel_fit.model_spectrum if status == 0 else np.full_like(spaxel_fit.data, np.nan),
+                'status': status
+            }
+
+        # Prepare arguments for parallel processing
+        fit_kwargs = {
+            'min_method': self.fit_arguments.get('min_method', 'slsqp'),
+            'minimum_good_fraction': self.fit_arguments.get('minimum_good_fraction', 0.8),
+            'verbose': False,
+            **self.fit_arguments.get('minimization_options', {})
+        }
+        
+        # Process spaxels in parallel
+        print(f"Processing {len(self.spaxel_indices)} spaxels in parallel with {n_workers or get_optimal_workers()} workers...")
+        results = parallel_process_cube(
+            process_spaxel_fit,
+            self.spaxel_indices,
+            fit_kwargs,
+            n_workers=n_workers,
+            chunksize=chunksize
+        )
+        
+        # Update the object with the results
+        for (y, x), result in results.items():
+            if result is not None:
+                self.solution[:, y, x] = result['solution']
+                self.reduced_chi_squared[y, x] = result['reduced_chi_squared']
+                self.model_spectrum[:, y, x] = result['model_spectrum']
+                self.status[y, x] = result['status']
+        
+        return self
 
     def integrate_flux(self, sigma_factor: float = 5.0):
         attributes = ['data', 'variance', 'flags', 'mask', 'pseudo_continuum', 'stellar', 'weights', 'status',

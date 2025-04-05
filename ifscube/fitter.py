@@ -1,9 +1,11 @@
 import argparse
 import os
 from typing import Union
+import time
 
 import matplotlib.pyplot as plt
 import numpy as np
+from tqdm import tqdm
 
 import ifscube.io.line_fit
 from . import Cube
@@ -11,7 +13,7 @@ from . import cubetools
 from . import onedspec
 from . import parser
 from . import spectools
-
+from .parallel_utils import parallel_process_cube, get_optimal_workers
 
 def make_lock(file_name):
     with open(file_name + '.lock', 'w') as f:
@@ -64,7 +66,7 @@ def spectrum_fit(data: Union[Cube, onedspec.Spectrum], **line_fit_args):
 
 
 def do_fit(file_name, line_fit_args, overwrite, loading, fit_type, config_file_name, plot=False, lock=False,
-           plot_all=True):
+           plot_all=True, n_workers=None, parallel=True):
     data_file = os.path.basename(file_name)
 
     try:
@@ -106,6 +108,42 @@ def do_fit(file_name, line_fit_args, overwrite, loading, fit_type, config_file_n
 
     if fit_type == 'cube':
         a = Cube(file_name, **loading)
+        
+        # Use parallel processing for cube data if enabled
+        if parallel:
+            line_fit_args['out_image'] = output_name
+            
+            if 'weights' in line_fit_args['copts']:
+                line_fit_args['copts']['weights'] = spectools.read_weights(a.rest_wavelength, line_fit_args['copts']['weights'])
+            
+            # Create a fit object to set up the fitting parameters
+            fit = ifscube.io.line_fit.setup_fit(a, **line_fit_args)
+            
+            # Process the cube in parallel
+            start_time = time.time()
+            print(f"Starting parallel processing with {n_workers or get_optimal_workers()} workers...")
+            fit = fit.fit_parallel(n_workers=n_workers)
+            end_time = time.time()
+            print(f"Parallel processing completed in {end_time - start_time:.2f} seconds")
+            
+            if line_fit_args['write_fits']:
+                kwargs = {_: line_fit_args[_] for _ in ['out_image', 'suffix', 'function', 'overwrite']}
+                ifscube.io.line_fit.write_spectrum_fit(fit, **kwargs)
+            
+            try:
+                cubetools.append_config(config_file_name, output_name)
+            except IOError:
+                if lock:
+                    clear_lock(lock_name)
+            
+            if plot:
+                fit.plot(plot_all=plot_all)
+                plt.show()
+            
+            if lock:
+                clear_lock(lock_name)
+            
+            return fit
     elif fit_type == 'spec':
         a = onedspec.Spectrum(file_name, **loading)
     else:
@@ -130,8 +168,7 @@ def do_fit(file_name, line_fit_args, overwrite, loading, fit_type, config_file_n
     if lock:
         clear_lock(lock_name)
 
-    return
-
+    return fit
 
 def main(fit_type):
     ap = argparse.ArgumentParser()
@@ -143,6 +180,10 @@ def main(fit_type):
                          "the same time.")
     ap.add_argument("-o", "--overwrite", action="store_true", help="Overwrites previous fit with the same name.")
     ap.add_argument("-p", "--plot", action="store_true", help="Plots the resulting fit.")
+    ap.add_argument("-n", "--n-workers", type=int, default=None, 
+                    help="Number of worker processes for parallel processing. Default is 75% of available CPU cores.")
+    ap.add_argument("--no-parallel", action="store_true", default=False,
+                    help="Disable parallel processing and use sequential processing instead.")
     ap.add_argument("datafile", help="FITS data file to be fit.", nargs="*")
 
     args = ap.parse_args()
@@ -151,4 +192,5 @@ def main(fit_type):
         c = parser.LineFitParser(args.config)
         line_fit_args = c.get_vars()
         do_fit(i, line_fit_args, overwrite=args.overwrite, plot=args.plot, loading=c.loading_opts, lock=args.lock,
-               fit_type=fit_type, config_file_name=args.config, plot_all=args.focused_plot)
+               fit_type=fit_type, config_file_name=args.config, plot_all=args.focused_plot, 
+               n_workers=args.n_workers, parallel=not args.no_parallel)
