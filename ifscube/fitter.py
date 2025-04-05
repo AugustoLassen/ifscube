@@ -180,8 +180,8 @@ def main(fit_type):
                          "the same time.")
     ap.add_argument("-o", "--overwrite", action="store_true", help="Overwrites previous fit with the same name.")
     ap.add_argument("-p", "--plot", action="store_true", help="Plots the resulting fit.")
-    ap.add_argument("-n", "--n-workers", type=int, default=None, 
-                    help="Number of worker processes for parallel processing. Default is 75% of available CPU cores.")
+    ap.add_argument("-n", "--n-workers", dest="n_workers", type=int, default=None,
+                    help="Number of worker processes for parallel processing. Default is 75 percent of available CPU cores.")
     ap.add_argument("--no-parallel", action="store_true", default=False,
                     help="Disable parallel processing and use sequential processing instead.")
     ap.add_argument("datafile", help="FITS data file to be fit.", nargs="*")
