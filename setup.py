@@ -14,7 +14,7 @@ package_data = {
 setup(
     name='ifscube-parallel',
     python_requires='>=3.7',
-    version="1.1-parallel",
+    version="1.1",
     packages=['ifscube', 'ifscube.io'],
     package_data=package_data,
     scripts=['bin/fit_scrutinizer', 'bin/cubefit', 'bin/specfit', 'bin/fit_rotation'],
