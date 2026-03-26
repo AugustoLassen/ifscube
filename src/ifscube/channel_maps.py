@@ -1,21 +1,20 @@
 import pickle
 import warnings
-from typing import Iterable
-
+import numpy as np
 import matplotlib as mpl
 import matplotlib.pyplot as plt
-import numpy as np
-from astropy import constants, units
-from astropy.units import Quantity
-from astropy.units.equivalencies import doppler_relativistic
-from matplotlib import patheffects
+
 from numpy import ma
-from scipy.integrate import trapezoid, quad_vec
+from typing import Iterable
+from matplotlib import patheffects
+from astropy.units import Quantity
+from astropy import constants, units
 from scipy.interpolate import interp1d
+from scipy.integrate import trapezoid, quad_vec
+from astropy.units.equivalencies import doppler_relativistic
 
 from . import Cube
 from . import cubetools
-
 
 class ChannelMaps:
     def __init__(self, cube: Cube, fitting_window: Iterable, method: str = "trapezoidal",
@@ -39,12 +38,12 @@ class ChannelMaps:
         self.velocity = None
 
         self.cube = cube
-
-        if cube.wcs.world_axis_units[0] == "":
-            self.wavelength_units = units.Unit(wavelength_units)
-        else:
-            self.wavelength_units = units.Unit(cube.wcs.world_axis_units[0])
-
+        self.wavelength_units = units.Unit("Angstrom")
+        # if cube.wcs.world_axis_units[0] == "":
+        #     self.wavelength_units = units.Unit(wavelength_units)
+        # else:
+        #     self.wavelength_units = units.Unit(cube.wcs.world_axis_units[0])
+        
         if units.ampere in units.Unit(cube.header_data["BUNIT"]).bases:
             self.data_units = units.Unit(cube.header_data["BUNIT"].replace("A", "Angstrom"))
         else:
@@ -63,8 +62,9 @@ class ChannelMaps:
 
     def set_channel_boundaries(self, reference_wavelength, vel_min, vel_max, channels):
         velocities = np.linspace(vel_min, vel_max, channels + 1)
-        wavelengths = Quantity(velocities).to(
-            unit=reference_wavelength.unit, equivalencies=doppler_relativistic(reference_wavelength))
+
+        wavelengths = Quantity(velocities).to(unit=reference_wavelength.unit,
+                                              equivalencies=doppler_relativistic(reference_wavelength))
 
         if self.method == "trapezoidal":
             closest_wavelengths = []
@@ -76,10 +76,12 @@ class ChannelMaps:
             wb = Quantity(closest_wavelengths, unit=reference_wavelength.unit)
             vb = wb.to(unit="km / s", equivalencies=doppler_relativistic(reference_wavelength))
             cv = Quantity(value=[(vb[_] + vb[_ + 1]) / 2.0 for _ in range(len(vb) - 1)])
+        
         elif self.method == "linear_interpolation":
             wb = wavelengths
             vb = velocities
             cv = Quantity(value=[(vb[_] + vb[_ + 1]) / 2.0 for _ in range(len(vb) - 1)])
+        
         else:
             raise RuntimeError(f"Method {self.method} is not supported.")
 
@@ -92,27 +94,39 @@ class ChannelMaps:
             options = {'n_iterate': 3, 'degree': 1, 'upper_threshold': 3.0, 'lower_threshold': 3.0}
 
         cp = options
+        # fw = self.fitting_window
+        fw = [self.cube.rest_wavelength[0],
+              self.cube.rest_wavelength[-1]]
 
-        fw = self.fitting_window
         c = self.cube.continuum(fitting_window=fw, continuum_options=cp)
+
         self.continuum = Quantity(value=c, unit=self.data_units)
 
     def evaluate_channel_maps(self, lambda0, vel_min, vel_max, channels, continuum_options=None):
-        self.velocity = Quantity(self.wavelength).to(unit="km / s", equivalencies=doppler_relativistic(rest=lambda0))
-        self.set_channel_boundaries(reference_wavelength=lambda0, vel_min=vel_min, vel_max=vel_max, channels=channels)
-        self.set_continuum(options=continuum_options)
+        self.velocity = Quantity(self.wavelength).to(
+            unit='km / s', equivalencies=doppler_relativistic(rest=lambda0))
+        
+        self.set_channel_boundaries(reference_wavelength=lambda0,
+                                    vel_min=vel_min,
+                                    vel_max=vel_max,
+                                    channels=channels)
+        
+        # self.set_continuum(options=continuum_options)
         self.integrate_maps()
 
     def integrate_maps(self):
         emission_flux = self.data - self.continuum
         wl = self.wavelength
         wb = self.wavelength_boundaries
+
         if self.method == "trapezoidal":
             masks = [(wl >= wb[_]) & (wl <= wb[_ + 1]) for _ in range(len(wb) - 1)]
             cm = [trapezoid(emission_flux[_], wl[_], axis=0) for _ in masks]
+        
         elif self.method == "linear_interpolation":
             f = interp1d(wl, emission_flux, axis=0, bounds_error=False, fill_value=0.0)
             cm = [quad_vec(f, a=wb[_].value, b=wb[_ + 1].value)[0] for _ in range(len(wb) - 1)]
+        
         else:
             raise RuntimeError
 
