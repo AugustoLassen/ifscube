@@ -6,7 +6,8 @@ import numpy as np
 from astropy import table
 from astropy.io import fits
 
-from ifscube import onedspec, modeling, datacube, parser
+from ifscube import onedspec, modeling, parser
+from ifscube import datacube
 
 
 def setup_fit(data: Union[onedspec.Spectrum, datacube.Cube], **line_fit_args):

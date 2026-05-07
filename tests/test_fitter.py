@@ -9,8 +9,8 @@ from ifscube.onedspec import Spectrum
 
 
 def basic_1d_fit():
-    config = importlib.resources.files("ifscube") / "examples/halpha_gauss.cfg"
-    input_data = importlib.resources.files("ifscube") / "examples/manga_onedspec.fits"
+    config = importlib.resources.files("ifscube") / "../../examples/halpha_gauss.cfg"
+    input_data = importlib.resources.files("ifscube") / "../../examples/manga_onedspec.fits"
     data = Spectrum(fname=str(input_data), scidata="F_OBS", primary="PRIMARY")
 
     c = parser.LineFitParser(str(config))

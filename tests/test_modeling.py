@@ -3,17 +3,18 @@ import importlib.resources
 import pytest
 from astropy import units
 
-from ifscube import onedspec, modeling, datacube
+from ifscube import onedspec, modeling
+from ifscube import datacube
 
 
 def fit_select(function: str = 'gaussian', fit_type: str = 'spectrum', **kwargs):
     if fit_type == 'spectrum':
-        file_name = importlib.resources.files("ifscube") / 'examples/manga_onedspec.fits'
+        file_name = importlib.resources.files("ifscube") / '../../examples/manga_onedspec.fits'
         spec = onedspec.Spectrum(file_name, primary='PRIMARY', scidata='F_OBS', variance='F_VAR', flags='F_FLAG',
                                  stellar='F_SYN')
         fit = modeling.LineFit(spec, function=function, fitting_window=(6400.0, 6800.0), **kwargs)
     elif fit_type == 'cube':
-        file_name = importlib.resources.files("ifscube") / 'examples/ngc3081_cube.fits'
+        file_name = importlib.resources.files("ifscube") / '../../examples/ngc3081_cube.fits'
         cube = datacube.Cube(file_name, variance='ERR')
         fit = modeling.LineFit3D(cube, function=function, fitting_window=(6400.0, 6800.0), **kwargs)
     else:
@@ -145,7 +146,7 @@ def test_good_fraction():
 
 
 def test_skip_feature():
-    file_name = importlib.resources.files("ifscube") / 'examples/ngc6300_nuc.fits'
+    file_name = importlib.resources.files("ifscube") / '../../examples/ngc6300_nuc.fits'
     spec = onedspec.Spectrum(file_name)
     fit = modeling.LineFit(spec, fitting_window=(6400.0, 6700.0))
     with pytest.warns(UserWarning):
@@ -202,7 +203,7 @@ def test_kinematic_groups():
 
 
 def test_fixed_features():
-    file_name = importlib.resources.files("ifscube") / 'examples/ngc6300_nuc.fits'
+    file_name = importlib.resources.files("ifscube") / '../../examples/ngc6300_nuc.fits'
     spec = onedspec.Spectrum(file_name)
     fit = modeling.LineFit(spec, function='gaussian', fitting_window=(6400.0, 6800.0))
     names = ['n2_6548', 'ha', 'n2_6583', 's2_6716', 's2_6731']
@@ -221,8 +222,9 @@ def test_get_model():
     fit.fit()
     a = fit.get_model("ha")
     index = fit.feature_names.index("ha")
+    rest_wl = np.array([fit.feature_wavelengths[index]])
     solution = fit._get_feature_parameter("ha", "all", "solution")
-    b = fit.function(fit.wavelength, index, solution)
+    b = fit.function(fit.wavelength, rest_wl, solution)
     assert np.all(a - b) == 0
 
 
@@ -239,12 +241,14 @@ def test_get_model_multiple():
     a = fit.get_model(["ha", "n2_6583"])
 
     index = fit.feature_names.index("ha")
+    rest_wl = np.array([fit.feature_wavelengths[index]])
     solution = fit._get_feature_parameter("ha", "all", "solution")
-    b = fit.function(fit.wavelength, index, solution)
+    b = fit.function(fit.wavelength, rest_wl, solution)
 
     index = fit.feature_names.index("n2_6583")
+    rest_wl = np.array([fit.feature_wavelengths[index]])
     solution = fit._get_feature_parameter("n2_6583", "all", "solution")
-    b += fit.function(fit.wavelength, index, solution)
+    b += fit.function(fit.wavelength, rest_wl, solution)
 
     assert np.all(a - b) == 0
 
@@ -374,7 +378,7 @@ def test_refit():
 
 
 def test_spiral_center():
-    file_name = importlib.resources.files("ifscube") / 'examples/ngc3081_cube.fits'
+    file_name = importlib.resources.files("ifscube") / '../../examples/ngc3081_cube.fits'
     cube = datacube.Cube(file_name)
     fit = modeling.LineFit3D(data=cube, spiral_center=None, spiral_loop=True)
     assert all(fit.spaxel_indices[0] == [4, 3]) and all(fit.spaxel_indices[-1] == [0, 5])
@@ -392,7 +396,7 @@ def test_spiral_center():
 
 
 def test_missing_k_group():
-    file_name = importlib.resources.files("ifscube") / 'examples/manga_onedspec.fits'
+    file_name = importlib.resources.files("ifscube") / '../../examples/manga_onedspec.fits'
     spec = onedspec.Spectrum(file_name, primary='PRIMARY', scidata='F_OBS', variance='F_VAR', flags='F_FLAG',
                              stellar='F_SYN')
     fit = modeling.LineFit(spec, function='gaussian', fitting_window=(6400.0, 6800.0))
